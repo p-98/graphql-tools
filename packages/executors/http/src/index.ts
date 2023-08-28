@@ -53,6 +53,10 @@ export interface HTTPExecutorOptions {
    */
   headers?: HeadersConfig | ((executorRequest?: ExecutionRequest) => HeadersConfig);
   /**
+   * Whether to include response headers in result
+   */
+  outputHeaders?: boolean;
+  /**
    * HTTP method to use when querying the original schema.
    */
   method?: 'GET' | 'POST';
@@ -83,25 +87,30 @@ export interface HTTPExecutorOptions {
 
 export type HeadersConfig = Record<string, string>;
 
+export type ExecutionResultAdditions = {
+  /** Response headers. Only non-existant if fetch doesn't return response. */
+  headers?: Headers;
+};
+
 export function buildHTTPExecutor(
   options?: Omit<HTTPExecutorOptions, 'fetch'> & { fetch: SyncFetchFn },
-): SyncExecutor<any, HTTPExecutorOptions>;
+): SyncExecutor<any, HTTPExecutorOptions, ExecutionResultAdditions>;
 
 export function buildHTTPExecutor(
   options?: Omit<HTTPExecutorOptions, 'fetch'> & { fetch: AsyncFetchFn },
-): AsyncExecutor<any, HTTPExecutorOptions>;
+): AsyncExecutor<any, HTTPExecutorOptions, ExecutionResultAdditions>;
 
 export function buildHTTPExecutor(
   options?: Omit<HTTPExecutorOptions, 'fetch'> & { fetch: RegularFetchFn },
-): AsyncExecutor<any, HTTPExecutorOptions>;
+): AsyncExecutor<any, HTTPExecutorOptions, ExecutionResultAdditions>;
 
 export function buildHTTPExecutor(
   options?: Omit<HTTPExecutorOptions, 'fetch'>,
-): AsyncExecutor<any, HTTPExecutorOptions>;
+): AsyncExecutor<any, HTTPExecutorOptions, ExecutionResultAdditions>;
 
 export function buildHTTPExecutor(
   options?: HTTPExecutorOptions,
-): Executor<any, HTTPExecutorOptions> {
+): Executor<any, HTTPExecutorOptions, ExecutionResultAdditions> {
   const executor = (request: ExecutionRequest<any, any, any, HTTPExecutorOptions>) => {
     const fetchFn = request.extensions?.fetch ?? options?.fetch ?? defaultFetch;
     let controller: AbortController | undefined;
@@ -148,6 +157,7 @@ export function buildHTTPExecutor(
       status?: number;
       statusText?: string;
     } = {};
+    const responseDetailsForResult: ExecutionResultAdditions = {};
 
     return new ValueOrPromise(() => {
       switch (method) {
@@ -205,6 +215,7 @@ export function buildHTTPExecutor(
       .then((fetchResult: Response): any => {
         responseDetailsForError.status = fetchResult.status;
         responseDetailsForError.statusText = fetchResult.statusText;
+        responseDetailsForResult.headers = fetchResult.headers;
         if (timeoutId != null) {
           clearTimeout(timeoutId);
         }
@@ -330,14 +341,22 @@ export function buildHTTPExecutor(
           };
         }
       })
+      .then(result => {
+        if (options?.outputHeaders) {
+          return Object.assign(result, responseDetailsForResult);
+        }
+        return result;
+      })
       .resolve();
   };
 
   if (options?.retry != null) {
     return function retryExecutor(request: ExecutionRequest) {
-      let result: ExecutionResult<any> | undefined;
+      let result: (ExecutionResult<any> & ExecutionResultAdditions) | undefined;
       let attempt = 0;
-      function retryAttempt(): Promise<ExecutionResult<any>> | ExecutionResult<any> {
+      function retryAttempt():
+        | Promise<ExecutionResult<any> & ExecutionResultAdditions>
+        | (ExecutionResult<any> & ExecutionResultAdditions) {
         attempt++;
         if (attempt > options!.retry!) {
           if (result != null) {

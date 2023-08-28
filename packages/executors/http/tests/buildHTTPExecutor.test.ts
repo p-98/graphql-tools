@@ -42,4 +42,22 @@ describe('buildHTTPExecutor', () => {
       ],
     });
   });
+  it('include headers if specified', async () => {
+    const headers = { accept: 'application/json' };
+    const executor = buildHTTPExecutor({
+      outputHeaders: true,
+      headers,
+      fetch(_url, init) {
+        return new Response(JSON.stringify({ data: init }));
+      },
+    });
+    const result = await executor({
+      document: parse(/* GraphQL */ `
+        query {
+          hello
+        }
+      `),
+    });
+    expect(result.headers).toBeInstanceOf(Object);
+  });
 });
